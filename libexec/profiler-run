@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+. "$(basher package-path shellm/profiler/lib/profiler.sh)"
+__profiler_run "$@"

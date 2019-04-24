@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+# TODO: ability to filter output with regular expressions (include/exclude)
+#    do it in report_by functions: | grep -v
+# TODO: add "command" type (from actual debug output)
+# TODO: read files and print lines when displaying by lines
+#    (we may encounter the eval limitation)
+
+header() {
+  printf "\e[1m%8s %8s %8s %8s  %s\e[0m\n" "Time (s)" "(%)" "Count" "(%)" "Code"
+}
+
+report_by_line() {
+  local snapshot=$1
+  paste - <(head -n-1 /tmp/profiler.${snapshot}.log | sed 's/ :.*//')
+}
+
+report_by_function() {
+  local snapshot=$1
+  paste - <(head -n-1 /tmp/profiler.${snapshot}.log | sed -r 's/[0-9]+ ://')
+}
+
+sum() {
+  awk '{
+    time[$2] += $1
+    count[$2] += 1
+    total_time += $1
+    total_count += 1
+  } END {
+    printf "%f\t%d\n", total_time, total_count
+    for (line in time)
+      printf "%f\t%d\t%s\n", time[line], count[line], line
+  }'
+}
+
+percent() {
+  local total_time
+  local total_count
+
+  read -r total_time total_count
+  awk '{
+    ptime = $1 / '${total_time}' * 100
+    pcount = $2 / '${total_count}' * 100
+    printf "%8f %8.2f %8d %8.2f  %s\n", $1, ptime, $2, pcount, $3
+  }'
+  printf "%8f %8s %8d %8s\n" ${total_time} 100 ${total_count} 100
+}
+
+get_timedata() {
+  local snapshot=$1
+  paste <(tail -n+2 /tmp/profiler.${snapshot}.tim) /tmp/profiler.${snapshot}.tim |
+    head -n-1 |
+    awk '{printf "%f\n", $1 - $2}'
+}
+
+report() {
+  local snapshot
+  local first_time=1
+
+  for snapshot in "${snapshots[@]}"; do
+    if [ ! -f /tmp/profiler.${snapshot}.log ]; then
+      echo "profiler: no such snapshot '${snapshot}'" >&2
+      continue
+    fi
+
+    if (( raw == 0 )); then
+      if (( first_time == 1 )); then
+        first_time=0
+      else
+        echo
+      fi
+
+      printf "\e[1mProfiler report for snapshot:\e[0m\n"
+      printf "   \e[7m${snapshot}\e[0m: $(</tmp/profiler.${snapshot}.cmd)\n"
+      echo
+      header
+    fi
+
+    get_timedata "${snapshot}" | ${report_func} "${snapshot}" | filter | sum | percent
+  done
+}
+
+report_combined() {
+  local s snapshot
+
+  if (( raw == 0 )); then
+    printf "\e[1mProfiler \e[35mcombined report\e[39m for snapshots:\e[0m\n"
+    for s in "${!snapshots[@]}"; do
+      if [ ! -f /tmp/profiler.${snapshots[s]}.log ]; then
+        printf "   \e[7m${snapshots[s]}\e[0m: \e[31mno such snapshot\e[0m\n" >&2
+        unset snapshots[$s]
+      else
+        printf "   \e[7m${snapshots[s]}\e[0m: $(</tmp/profiler.${snapshots[s]}.cmd)\n"
+      fi
+    done
+    echo
+    header
+  fi
+
+  for snapshot in "${snapshots[@]}"; do
+    get_timedata "${snapshot}" | ${report_func} "${snapshot}" | filter
+  done | sum | percent
+}
+
+declare -a snapshots
+declare combine=0
+declare raw=0
+declare groupby=line
+declare report_func=
+declare filter_regex=
+declare filter_reverse=0
+
+options="$(getopt -n profiler-report -o "cFf:g:hlR" -l "combine,filter-reverse,filter:group-by:,help,list,raw" -- "$@")"
+eval set -- "${options}"
+
+while (( $# != 0 )); do
+  case $1 in
+    -c|--combine) combine=1 ;;
+    -F|--filter-reverse) filter_reverse=1 ;;
+    -f|--filter) filter_regex="$2"; shift ;;
+    -g|--group-by)
+      case $2 in
+        l*) groupby=line ;;
+        f*) groupby=function ;;
+        *)
+          echo "profiler-report: wrong group for -g: '$2', choices are: line, function" >&2
+          exit 1
+        ;;
+      esac
+      shift
+    ;;
+    -h|--help) ;;
+    -l|--list)
+      find /tmp -type f -name "profiler.*" 2>/dev/null | sed -r 's/^\/tmp\/profiler\.//;s/\.(cmd|tim|log)$//' | sort -u
+      exit 0
+    ;;
+    -R|--raw) raw=1 ;;
+    --) shift; break ;;
+  esac
+  shift
+done
+
+if (( $# == 0 )); then
+  snapshots=(${PPID})
+else
+  snapshots=("$@")
+fi
+
+report_func=report_by_${groupby}
+
+base_filter() {
+  grep -vF shellm/profiler/lib/profiler.sh
+}
+
+if [ -n "${filter_regex}" ]; then
+  (( filter_reverse == 1 )) && grep_opt=-v
+  filter() { base_filter | grep -E ${grep_opt} "${filter_regex}"; }
+else
+  filter() { base_filter; }
+fi
+
+if (( combine == 1 )); then
+  report_combined
+else
+  report
+fi
