@@ -3,11 +3,11 @@
 # TODO: keep actual command
 #    will be used in reports
 
-PROFILER_PS4='- ${BASH_SOURCE}:${LINENO} :${FUNCNAME}\$\$'
+PROFILER_PS4='§ ${BASH_SOURCE}:${LINENO} :${FUNCNAME}\$\$'
 
 __profiler_redirect_xtrace() {
-  tee >(sed -ru 's/\$\$.*$//;s/^-+ //' >/tmp/profiler.$1.log) |
-    sed -u 's/^.*$/now/' |
+  tee >(sed -ru '/^[^§]/d;s/\$\$.*$//;s/^§+ //' >/tmp/profiler.$1.log) |
+    sed -u '/^[^§]/d;s/^.*$/now/' |
     date -f - '+%s.%N' >/tmp/profiler.$1.tim
 }
 

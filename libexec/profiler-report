@@ -71,7 +71,7 @@ report() {
       fi
 
       printf "\e[1mProfiler report for snapshot:\e[0m\n"
-      printf "   \e[7m${snapshot}\e[0m: $(</tmp/profiler.${snapshot}.cmd)\n"
+      printf "   \e[7m${snapshot}\e[0m - $(</tmp/profiler.${snapshot}.cmd)\n"
       echo
       header
     fi
@@ -87,10 +87,10 @@ report_combined() {
     printf "\e[1mProfiler \e[35mcombined report\e[39m for snapshots:\e[0m\n"
     for s in "${!snapshots[@]}"; do
       if [ ! -f /tmp/profiler.${snapshots[s]}.log ]; then
-        printf "   \e[7m${snapshots[s]}\e[0m: \e[31mno such snapshot\e[0m\n" >&2
+        printf "   \e[7m${snapshots[s]}\e[0m - \e[31mno such snapshot\e[0m\n" >&2
         unset snapshots[$s]
       else
-        printf "   \e[7m${snapshots[s]}\e[0m: $(</tmp/profiler.${snapshots[s]}.cmd)\n"
+        printf "   \e[7m${snapshots[s]}\e[0m - $(</tmp/profiler.${snapshots[s]}.cmd)\n"
       fi
     done
     echo
