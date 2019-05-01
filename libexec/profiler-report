@@ -1,56 +1,193 @@
 #!/usr/bin/env bash
 
-# TODO: ability to filter output with regular expressions (include/exclude)
-#    do it in report_by functions: | grep -v
 # TODO: add "command" type (from actual debug output)
 # TODO: read files and print lines when displaying by lines
 #    (we may encounter the eval limitation)
 
+PROFILER_MARKER=$'\035'  # group separator character
+PROFILER_PACKAGES=${PROFILER_PACKAGES:-/etc/bash_completion.d:/usr/share/bash-completion:/usr/lib/git-core:$(echo $(basher list) | sed 's/ /:/g'):basher}
+
 header() {
-  printf "\e[1m%8s %8s %8s %8s  %s\e[0m\n" "Time (s)" "(%)" "Count" "(%)" "Code"
+  printf "\e[1m%-10s %8s %8s %8s  %s\e[0m\n" "Time (s)" "(%)" "Inst." "(%)" "${groupby^}"
 }
 
-report_by_line() {
+paste_with_line() {
   local snapshot=$1
-  paste - <(head -n-1 /tmp/profiler.${snapshot}.log | sed 's/ :.*//')
+  local m=${PROFILER_MARKER}
+
+  cache() {
+    if [ -z "${var_cache["$1"]}" ]; then
+      var_cache["$1"]=file$i
+      if [ -f "$1" ]; then
+        mapfile -t -O1 file$i < "$1"
+      else
+        declare -ga file$i
+      fi
+      (( i++ ))
+    fi
+  }
+
+  line() {
+    declare -n lines=${var_cache["$1"]}
+    declare -n _line=${2:-line}
+    _line=${lines[${lineno}]}
+    _line=${_line#"${_line%%[![:space:]]*}"}
+  }
+
+  paste /tmp/profiler.${snapshot}.timedata <(
+    declare -A var_cache
+    declare last_source
+    declare interactive=0
+    declare -a eval_source
+    declare -A last_lineno
+    declare line
+
+    while IFS=$m read -r level source prevsource lineno func command; do
+      i=${i:-0}
+      # as soon as we find an empty source, we know we're in the interactive part
+      [ -z "${source}" ] && interactive=1
+
+      if (( interactive == 1 )); then
+
+        if [ -n "${func}" ]; then
+          source+=" (${func})"
+        fi
+
+        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m:\e[94m'"${lineno}"$'\e[33m '"${command}"$'\e[0m'
+        continue
+      # when source is "environment", it's (usually?) an exported function
+      elif [ "${source}" = "environment" ] || [[ "${source}" == "/dev/fd/"* ]]; then
+        echo $'\e[93m'"${prevsource}"$'\e[0m:\e[94m'"${last_lineno[${prevsource}]}+${lineno}"$'\e[33m '"${command}"$'\e[0m'
+        continue
+      fi
+
+      last_source=${source}
+      last_lineno[${source}]=${lineno}
+
+      cache "${source}"
+      line "${source}"
+
+      echo $'\e[95m'"${source}"$'\e[0m:\e[94m'"${lineno}"$'\e[36m'" ${line}"$'\e[0m'
+    done </tmp/profiler.${snapshot}.cmddata
+  )
 }
 
-report_by_function() {
+# TODO: store function names in an associative array with sources as values
+#   in order to be able to tell the source when it's "environment"
+#  Another way, maybe smarter, is to search in the xtrace for the definition
+#   of the function: grep -Fe "$func()" -e "function $func"
+paste_with_function() {
   local snapshot=$1
-  paste - <(head -n-1 /tmp/profiler.${snapshot}.log | sed -r 's/[0-9]+ ://')
+  local m=${PROFILER_MARKER}
+  paste /tmp/profiler.${snapshot}.timedata <(
+    declare interactive=0
+    declare -A func_type
+
+    while IFS=$m read -r level source prevsource lineno func command; do
+      [ -z "${source}" ] && interactive=1
+      [ "${source}" = "environment" ] && source=${prevsource}
+
+      case $func in
+        "") func=$'<\e[94mmain\e[0m>'; [ -z "${source}" ] || func_type[${source}]=${func} ;;
+        source) func=$'<\e[94msource\e[0m>'; [ -z "${source}" ] || func_type[${source}]=${func} ;;
+        eval) func=$'\e[94m'"${func_type[${source}]}"$'\e[0m' ;;
+        *) func=$'\e[36m'"${func}"$'\e[0m' ;;
+      esac
+
+      if (( interactive == 1 )); then
+        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m:'"${func}"
+      else
+        echo $'\e[95m'"${source}"$'\e[0m:'"${func}"
+      fi
+    done <"/tmp/profiler.${snapshot}.cmddata"
+  )
+}
+
+paste_with_source() {
+  local snapshot=$1
+  local m=${PROFILER_MARKER}
+  paste /tmp/profiler.${snapshot}.timedata <(
+    declare interactive=0
+    sed -r "s/$m[0-9]+$m.*//" /tmp/profiler.${snapshot}.cmddata |
+    while IFS=$m read -r level source prevsource; do
+      [ -z "${source}" ] && interactive=1
+      [ "${source}" = "environment" ] && source=${prevsource}
+
+      if (( interactive == 1 )); then
+        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m'
+      else
+        echo $'\e[95m'"${source}"$'\e[0m'
+      fi
+    done
+  )
+}
+
+paste_with_package() {
+  local snapshot=$1
+  local m=${PROFILER_MARKER}
+  local p packages re=""
+
+  IFS=: read -ra packages <<<"${PROFILER_PACKAGES}"
+  for p in "${packages[@]}"; do
+    p="${p//\//\\\/}"
+    p="${p//./\\.}"
+    re+="$p|"
+  done
+
+  re="s/$m[^$m]*(${re:0:-1})\b[^$m]*$m/$m\1$m/"
+
+  paste /tmp/profiler.${snapshot}.timedata <(
+    declare interactive=0
+    sed -r "s/$m[0-9]+$m.*/$m/;${re}" /tmp/profiler.${snapshot}.cmddata |
+    while IFS=$m read -r level source prevsource end; do
+      [ -z "${source}" ] && interactive=1
+      [ "${source}" = "environment" ] && source=${prevsource}
+
+      if (( interactive == 1 )); then
+        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m'
+      else
+        echo $'\e[95m'"${source}"$'\e[0m'
+      fi
+    done
+  )
 }
 
 sum() {
-  awk '{
-    time[$2] += $1
-    count[$2] += 1
-    total_time += $1
-    total_count += 1
+  awk -F '\t' '{
+    f1 = $1
+    $1 = ""
+    line = substr($0, 2)
+    total_time += f1
+    total_inst += 1
+    time[line] += f1
+    inst[line] += 1
+    if (!(line in seen)) {
+      seen[line] = 1
+      order[++arraylen] = line
+    }
   } END {
-    printf "%f\t%d\n", total_time, total_count
-    for (line in time)
-      printf "%f\t%d\t%s\n", time[line], count[line], line
+    printf "%f\t%d\n", total_time, total_inst
+    for (i=1; i<=arraylen; i++) {
+      line = order[i]
+      printf "%f\t%d\t%s\n", time[line], inst[line], line
+    }
   }'
 }
 
 percent() {
   local total_time
-  local total_count
+  local total_inst
 
-  read -r total_time total_count
-  awk '{
-    ptime = $1 / '${total_time}' * 100
-    pcount = $2 / '${total_count}' * 100
-    printf "%8f %8.2f %8d %8.2f  %s\n", $1, ptime, $2, pcount, $3
+  read -r total_time total_inst
+  awk -F '\t' '{
+    f1 = $1
+    f2 = $2
+    $1 = $2 = ""
+    ptime = f1 / '${total_time}' * 100
+    pinst = f2 / '${total_inst}' * 100
+    printf "%10f %8.3f %8d %8.3f  %s\n", f1, ptime, f2, pinst, substr($0, 3)
   }'
-  printf "%8f %8s %8d %8s\n" ${total_time} 100 ${total_count} 100
-}
-
-get_timedata() {
-  local snapshot=$1
-  paste <(tail -n+2 /tmp/profiler.${snapshot}.tim) /tmp/profiler.${snapshot}.tim |
-    head -n-1 |
-    awk '{printf "%f\n", $1 - $2}'
+  printf "%10f %8s %8d %8s\n" ${total_time} 100 ${total_inst} 100
 }
 
 report() {
@@ -58,12 +195,12 @@ report() {
   local first_time=1
 
   for snapshot in "${snapshots[@]}"; do
-    if [ ! -f /tmp/profiler.${snapshot}.log ]; then
+    if [ ! -f /tmp/profiler.${snapshot}.cmddata ]; then
       echo "profiler: no such snapshot '${snapshot}'" >&2
       continue
     fi
 
-    if (( raw == 0 )); then
+    if (( plain == 0 )); then
       if (( first_time == 1 )); then
         first_time=0
       else
@@ -76,17 +213,17 @@ report() {
       header
     fi
 
-    get_timedata "${snapshot}" | ${report_func} "${snapshot}" | filter | sum | percent
+    paste_with_${groupby} "${snapshot}" | filter | sum | percent
   done
 }
 
 report_combined() {
   local s snapshot
 
-  if (( raw == 0 )); then
+  if (( plain == 0 )); then
     printf "\e[1mProfiler \e[35mcombined report\e[39m for snapshots:\e[0m\n"
     for s in "${!snapshots[@]}"; do
-      if [ ! -f /tmp/profiler.${snapshots[s]}.log ]; then
+      if [ ! -f /tmp/profiler.${snapshots[s]}.cmddata ]; then
         printf "   \e[7m${snapshots[s]}\e[0m - \e[31mno such snapshot\e[0m\n" >&2
         unset snapshots[$s]
       else
@@ -98,43 +235,51 @@ report_combined() {
   fi
 
   for snapshot in "${snapshots[@]}"; do
-    get_timedata "${snapshot}" | ${report_func} "${snapshot}" | filter
+    paste_with_${groupby} "${snapshot}" | filter
   done | sum | percent
+}
+
+match_filter() {
+  grep -E "${match[@]}" || true
+}
+
+unmatch_filter() {
+  grep -Ev "${unmatch[@]}" || true
 }
 
 declare -a snapshots
 declare combine=0
 declare raw=0
 declare groupby=line
-declare report_func=
-declare filter_regex=
-declare filter_reverse=0
+declare -a match
+declare -a unmatch=(
+  -e shellm/profiler/lib/profiler.sh
+)
 
-options="$(getopt -n profiler-report -o "cFf:g:hlR" -l "combine,filter-reverse,filter:group-by:,help,list,raw" -- "$@")"
-eval set -- "${options}"
+options="$(getopt -n profiler-report -o "cg:hM:m:pr" -l "combine,group-by:,help,unmatch:,match:,plain,raw" -- "$@")"
+command eval set -- "${options}"
 
 while (( $# != 0 )); do
   case $1 in
     -c|--combine) combine=1 ;;
-    -F|--filter-reverse) filter_reverse=1 ;;
-    -f|--filter) filter_regex="$2"; shift ;;
+    -M|--unmatch) unmatch+=(-e "$2"); shift ;;
+    -m|--match) match+=(-e "$2"); shift ;;
     -g|--group-by)
       case $2 in
         l*) groupby=line ;;
         f*) groupby=function ;;
+        s*) groupby=source ;;
+        p*) groupby=package ;;
         *)
-          echo "profiler-report: wrong group for -g: '$2', choices are: line, function" >&2
+          echo "profiler-report: wrong group for -g: '$2', choices are: line, function, source, package" >&2
           exit 1
         ;;
       esac
       shift
     ;;
     -h|--help) ;;
-    -l|--list)
-      find /tmp -type f -name "profiler.*" 2>/dev/null | sed -r 's/^\/tmp\/profiler\.//;s/\.(cmd|tim|log)$//' | sort -u
-      exit 0
-    ;;
-    -R|--raw) raw=1 ;;
+    -p|--plain) plain=1 ;;
+    -r|--raw) raw=1 ;;
     --) shift; break ;;
   esac
   shift
@@ -146,17 +291,10 @@ else
   snapshots=("$@")
 fi
 
-report_func=report_by_${groupby}
-
-base_filter() {
-  grep -vF shellm/profiler/lib/profiler.sh
-}
-
-if [ -n "${filter_regex}" ]; then
-  (( filter_reverse == 1 )) && grep_opt=-v
-  filter() { base_filter | grep -E ${grep_opt} "${filter_regex}"; }
+if [ ${#match[@]} -gt 0 ]; then
+  filter() { match_filter | unmatch_filter; }
 else
-  filter() { base_filter; }
+  filter() { unmatch_filter; }
 fi
 
 if (( combine == 1 )); then

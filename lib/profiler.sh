@@ -1,23 +1,42 @@
 #!/usr/bin/env bash
 
-# TODO: keep actual command
-#    will be used in reports
+# TODO: keep actual command, they will be used in reports
+PROFILER_MARKER=$'\035'  # group separator character
+PROFILER_PS4='${PROFILER_MARKER} ${BASH_SOURCE[0]}${PROFILER_MARKER}${BASH_SOURCE[1]}${PROFILER_MARKER}${LINENO}${PROFILER_MARKER}${FUNCNAME}${PROFILER_MARKER}'
 
-PROFILER_PS4='§ ${BASH_SOURCE}:${LINENO} :${FUNCNAME}\$\$'
+export PROFILER_MARKER
+
+eval() {
+  # . <(echo "$@")
+  command eval "$@"
+}
+
+profiler_cache_function_contents() {
+  for f in $(declare -F | cut -d" " -f3); do
+    declare -f $f | head -n-1 | tail -n+3 > /tmp/profiler-function-contents.$f
+  done
+  exit &>/dev/null
+}
+
+export -f eval
+export -f profiler_cache_function_contents
 
 __profiler_redirect_xtrace() {
-  tee >(sed -ru '/^[^§]/d;s/\$\$.*$//;s/^§+ //' >/tmp/profiler.$1.log) |
-    sed -u '/^[^§]/d;s/^.*$/now/' |
-    date -f - '+%s.%N' >/tmp/profiler.$1.tim
+  tee "/tmp/profiler.$1.xtrace" | {
+    sed 's/^.*$/now/'
+    echo now
+  } | date -f - '+%s.%N' >"/tmp/profiler.$1.timestamps"
+  echo "${PROFILER_MARKER}" >>"/tmp/profiler.$1.xtrace"
 }
 
 __profiler_start() {
   local snapshot=${1:-$$}
   PROFILER_OLD_PS4=${PS4}
   PS4=${PROFILER_PS4}
+  export PROFILER=1
 
-  if [ ! -f /tmp/profiler.${snapshot}.cmd ]; then
-    echo "$0" "$@" >/tmp/profiler.${snapshot}.cmd
+  if [ ! -f "/tmp/profiler.${snapshot}.cmd" ]; then
+    echo "$0" "$@" >"/tmp/profiler.${snapshot}.cmd"
   fi
 
   exec 4> >(__profiler_redirect_xtrace ${snapshot})
@@ -28,6 +47,7 @@ __profiler_start() {
 __profiler_stop() {
   set +x
   unset BASH_XTRACEFD
+  unset PROFILER
   PS4=${PROFILER_OLD_PS4}
 }
 
@@ -40,7 +60,7 @@ __profiler_run() {
   local noreport=0
 
   options="$(getopt -n profiler-run -o "g:hi:ns" -l "group-by:,help,snapshot-id:,no-report,subshells" -- "$@")"
-  eval set -- "${options}"
+  command eval set -- "${options}"
 
   while (( $# != 0 )); do
     case $1 in
@@ -63,7 +83,7 @@ __profiler_run() {
     return 1
   fi
 
-  echo "$@" >/tmp/profiler.${snapshot}.cmd
+  echo "$@" >"/tmp/profiler.${snapshot}.cmd"
 
   (( subshells == 1 )) && export SHELLOPTS
 
@@ -76,12 +96,22 @@ __profiler_run() {
     *)
       old_ps4=${PS4}
       export PS4=${PROFILER_PS4}
-      BASH_XTRACEFD=4 bash -x "$@" 4> >(__profiler_redirect_xtrace ${snapshot})
+      [ "$1" = "bash" ] && shift
+      export BASH_XTRACEFD
+      export PROFILER
+      BASH_XTRACEFD=4 PROFILER=1 bash -x "$@" 4> >(__profiler_redirect_xtrace ${snapshot})
       PS4=${old_ps4}
     ;;
   esac
 
-  (( noreport == 1 )) || profiler report "${snapshot}" -g "${groupby}"
+  if (( noreport != 1 )); then
+    while lsof -c bash | grep -Fq "/tmp/profiler.${snapshot}.xtrace"; do
+      sleep 0.1
+    done
+    sleep 0.2
+    profiler collate "${snapshot}"
+    profiler report "${snapshot}" -g "${groupby}"
+  fi
 }
 
 profiler() {

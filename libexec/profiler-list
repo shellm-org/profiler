@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+find /tmp -type f -name "profiler.*" 2>/dev/null | sed -r 's/^\/tmp\/profiler\.//;s/\.(cmd.*|time.*|xtrace)$//' | sort -u

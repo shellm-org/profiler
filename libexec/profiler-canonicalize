@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+declare -A cache
+
+source realpaths
+
+temp=$(mktemp)
+
+M="${PROFILER_MARKER:-$'\035'}"  # group separator character
+
+for snapshot in "$@"; do
+  while IFS=$M read -r level path prevpath lineno func command; do
+    if [ -n "${path}" ]; then
+      if [ -z "${cache[${path}]}" ]; then
+        realpath.canonical "${path}"
+        if [ -f "${REPLY}" ]; then
+          cache[${path}]=${REPLY}
+        else
+          cache[${path}]=${path}
+        fi
+      fi
+      path=${cache[${path}]}
+    fi
+    if [ -n "${prevpath}" ]; then
+      if [ -z "${cache[${prevpath}]}" ]; then
+        realpath.canonical "${prevpath}"
+        if [ -f "${REPLY}" ]; then
+          cache[${prevpath}]=${REPLY}
+        else
+          cache[${prevpath}]=${prevpath}
+        fi
+      fi
+      prevpath=${cache[${prevpath}]}
+    fi
+    echo "${level}$M${path}$M${prevpath}$M${lineno}$M${func}$M${command}"
+  done </tmp/profiler.${snapshot}.cmddata >"${temp}"
+  mv "${temp}" /tmp/profiler.${snapshot}.cmddata
+done
