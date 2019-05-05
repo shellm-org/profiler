@@ -2,6 +2,7 @@
 
 declare -A cache
 
+# shellcheck disable=SC1091
 source realpaths
 
 temp=$(mktemp)
@@ -33,6 +34,6 @@ for snapshot in "$@"; do
       prevpath=${cache[${prevpath}]}
     fi
     echo "${level}$M${path}$M${prevpath}$M${lineno}$M${func}$M${command}"
-  done </tmp/profiler.${snapshot}.cmddata >"${temp}"
-  mv "${temp}" /tmp/profiler.${snapshot}.cmddata
+  done <"/tmp/profiler.${snapshot}.cmddata" >"${temp}"
+  mv "${temp}" "/tmp/profiler.${snapshot}.cmddata"
 done

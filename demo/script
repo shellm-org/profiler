@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+echo "Hello Demo!"
+echo sleep 1 && sleep 1
+echo sleep 2; sleep 2
+echo sleep 3
+sleep 3
+echo "Thank you, bye."

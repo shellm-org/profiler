@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# shellcheck disable=SC2155
+export PATH="${BASHER_PACKAGES_PATH}/shellm/profiler/commands:${PATH}"
+
+command="$1"
+
+case ${command} in
+  "") profiler_help ;;
+  *)
+    command_path="$(command -v "profiler-${command}" || true)"
+    if [ -z "${command_path}" ]; then
+      echo "profiler: no such command '${command}'" >&2
+      exit 1
+    fi
+
+    shift 1
+    "${command_path}" "$@"
+  ;;
+esac

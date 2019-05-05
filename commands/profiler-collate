@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [ $# -eq 0 ]; then
+  >&2 echo "usage: profiler collate SNAPSHOT [SNAPSHOT...]"
+  exit 1
+fi
+
+MARKER=$'\035'
+MARKER_LITERAL="\035"
+
+collate() {
+  local timedata
+  local cmddata
+
+  timedata=/tmp/profiler.$1.timedata
+  cmddata=/tmp/profiler.$1.cmddata
+
+  # paste timestamps and xtrace together,
+  # concatenate multi-line commands into single lines,
+  # then split the two columns (timestamp and command) into two files
+  paste "/tmp/profiler.$1.timestamps" "/tmp/profiler.$1.xtrace" |
+    awk -v marker=${MARKER_LITERAL} '{
+      if ($0 ~ marker) { printf "\n%s", $0 }
+      else { printf "\\n%s", substr($0, 22) }
+    } END { printf "\n" }' |
+    awk -v timedata="${timedata}.tmp" -v cmddata="${cmddata}.tmp" 'NR>1 {
+      print $1 > timedata
+      $1 = ""
+      print substr($0, 2) > cmddata
+    }'
+
+  # compute the time deltas for each command
+  # (timedelta(command(N)) = timestamp(N+1) - timestamp(N))
+  # we simply paste the timestamps columns with its 1-shifted version,
+  # so we can do first_column-second_column, instead of more complex stuff
+  paste <(tail -n+2 "${timedata}.tmp") "${timedata}.tmp" |
+    head -n-1 |
+    awk '{printf "%f\n", $1 - $2}' >"${timedata}"
+
+  # replace sequences of ^Marker* by their length, followed by a single marker:
+  # it's the shell level (kind of scope level)
+  # (e.g.: MarkerMarker -> 2)
+  # See man bash, PS4 prompt first character
+  head -n-1 "${cmddata}.tmp" |
+    awk '$1=length($1)' |
+    sed -r 's/ /'"${MARKER}"'/' >"${cmddata}"
+
+  # delete temp files
+  # rm "${timedata}.tmp"
+  # rm "${cmddata}.tmp"
+}
+
+for snapshot; do
+  error=0
+  for file in "/tmp/profiler.${snapshot}.timestamps" "/tmp/profiler.${snapshot}.xtrace"; do
+    if [ ! -f "${file}" ]; then
+      error=1
+      >&2 echo "profiler: collate: missing file '${file}'"
+    fi
+  done
+  if (( error == 0 )); then
+    echo -n "Collating snapshot '${snapshot}'... "
+    collate "${snapshot}"
+    echo "done"
+  fi
+done

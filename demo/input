@@ -1,0 +1,10 @@
+# demo: charinterval=0
+cdrepo shellm/profiler/demo
+export PROFILE_PROMPT='\[\033[00;34m\]profiler demo \[\033[00;35m\]\$ \[\033[00m\]'
+clear
+
+termtosvg -g 100x20 demo.svg -t window_frame  # demo: charinterval=0.06; sleep 2
+bat script  # demo: sleep 4
+clear
+profiler run script  # demo: sleep 14
+# demo: sleep 1

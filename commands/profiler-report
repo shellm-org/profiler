@@ -5,6 +5,7 @@
 #    (we may encounter the eval limitation)
 
 PROFILER_MARKER=$'\035'  # group separator character
+# shellcheck disable=SC2001,SC2046,SC2005
 PROFILER_PACKAGES=${PROFILER_PACKAGES:-/etc/bash_completion.d:/usr/share/bash-completion:/usr/lib/git-core:$(echo $(basher list) | sed 's/ /:/g'):basher}
 
 header() {
@@ -19,9 +20,9 @@ paste_with_line() {
     if [ -z "${var_cache["$1"]}" ]; then
       var_cache["$1"]=file$i
       if [ -f "$1" ]; then
-        mapfile -t -O1 file$i < "$1"
+        mapfile -t -O1 "file$i" < "$1"
       else
-        declare -ga file$i
+        declare -ga "file$i"
       fi
       (( i++ ))
     fi
@@ -34,11 +35,9 @@ paste_with_line() {
     _line=${_line#"${_line%%[![:space:]]*}"}
   }
 
-  paste /tmp/profiler.${snapshot}.timedata <(
+  paste "/tmp/profiler.${snapshot}.timedata" <(
     declare -A var_cache
-    declare last_source
     declare interactive=0
-    declare -a eval_source
     declare -A last_lineno
     declare line
 
@@ -61,14 +60,13 @@ paste_with_line() {
         continue
       fi
 
-      last_source=${source}
       last_lineno[${source}]=${lineno}
 
       cache "${source}"
       line "${source}"
 
       echo $'\e[95m'"${source}"$'\e[0m:\e[94m'"${lineno}"$'\e[36m'" ${line}"$'\e[0m'
-    done </tmp/profiler.${snapshot}.cmddata
+    done <"/tmp/profiler.${snapshot}.cmddata"
   )
 }
 
@@ -79,7 +77,7 @@ paste_with_line() {
 paste_with_function() {
   local snapshot=$1
   local m=${PROFILER_MARKER}
-  paste /tmp/profiler.${snapshot}.timedata <(
+  paste "/tmp/profiler.${snapshot}.timedata" <(
     declare interactive=0
     declare -A func_type
 
@@ -106,9 +104,10 @@ paste_with_function() {
 paste_with_source() {
   local snapshot=$1
   local m=${PROFILER_MARKER}
-  paste /tmp/profiler.${snapshot}.timedata <(
+  paste "/tmp/profiler.${snapshot}.timedata" <(
     declare interactive=0
-    sed -r "s/$m[0-9]+$m.*//" /tmp/profiler.${snapshot}.cmddata |
+    # shellcheck disable=SC1087
+    sed -r "s/$m[0-9]+$m.*//" "/tmp/profiler.${snapshot}.cmddata" |
     while IFS=$m read -r level source prevsource; do
       [ -z "${source}" ] && interactive=1
       [ "${source}" = "environment" ] && source=${prevsource}
@@ -134,11 +133,13 @@ paste_with_package() {
     re+="$p|"
   done
 
+  # shellcheck disable=SC1087
   re="s/$m[^$m]*(${re:0:-1})\b[^$m]*$m/$m\1$m/"
 
-  paste /tmp/profiler.${snapshot}.timedata <(
+  paste "/tmp/profiler.${snapshot}.timedata" <(
     declare interactive=0
-    sed -r "s/$m[0-9]+$m.*/$m/;${re}" /tmp/profiler.${snapshot}.cmddata |
+    # shellcheck disable=SC2034,SC1087
+    sed -r "s/$m[0-9]+$m.*/$m/;${re}" "/tmp/profiler.${snapshot}.cmddata" |
     while IFS=$m read -r level source prevsource end; do
       [ -z "${source}" ] && interactive=1
       [ "${source}" = "environment" ] && source=${prevsource}
@@ -179,15 +180,15 @@ percent() {
   local total_inst
 
   read -r total_time total_inst
-  awk -F '\t' '{
+  awk -F '\t' -v total_time="${total_time}" -v total_inst="${total_inst}" '{
     f1 = $1
     f2 = $2
     $1 = $2 = ""
-    ptime = f1 / '${total_time}' * 100
-    pinst = f2 / '${total_inst}' * 100
+    ptime = f1 / total_time * 100
+    pinst = f2 / total_inst * 100
     printf "%10f %8.3f %8d %8.3f  %s\n", f1, ptime, f2, pinst, substr($0, 3)
   }'
-  printf "%10f %8s %8d %8s\n" ${total_time} 100 ${total_inst} 100
+  printf "%10f %8s %8d %8s\n" "${total_time}" 100 "${total_inst}" 100
 }
 
 report() {
@@ -195,7 +196,7 @@ report() {
   local first_time=1
 
   for snapshot in "${snapshots[@]}"; do
-    if [ ! -f /tmp/profiler.${snapshot}.cmddata ]; then
+    if [ ! -f "/tmp/profiler.${snapshot}.cmddata" ]; then
       echo "profiler: no such snapshot '${snapshot}'" >&2
       continue
     fi
@@ -208,11 +209,12 @@ report() {
       fi
 
       printf "\e[1mProfiler report for snapshot:\e[0m\n"
-      printf "   \e[7m${snapshot}\e[0m - $(</tmp/profiler.${snapshot}.cmd)\n"
+      printf "   \e[7m%s\e[0m - %s\n" "${snapshot}" "$(<"/tmp/profiler.${snapshot}.cmd")"
       echo
       header
     fi
 
+    # shellcheck disable=SC2086
     paste_with_${groupby} "${snapshot}" | filter | sum | percent
   done
 }
@@ -223,11 +225,11 @@ report_combined() {
   if (( plain == 0 )); then
     printf "\e[1mProfiler \e[35mcombined report\e[39m for snapshots:\e[0m\n"
     for s in "${!snapshots[@]}"; do
-      if [ ! -f /tmp/profiler.${snapshots[s]}.cmddata ]; then
-        printf "   \e[7m${snapshots[s]}\e[0m - \e[31mno such snapshot\e[0m\n" >&2
-        unset snapshots[$s]
+      if [ ! -f "/tmp/profiler.${snapshots[s]}.cmddata" ]; then
+        printf "   \e[7m%s\e[0m - \e[31mno such snapshot\e[0m\n" "${snapshots[s]}" >&2
+        unset snapshots["$s"]
       else
-        printf "   \e[7m${snapshots[s]}\e[0m - $(</tmp/profiler.${snapshots[s]}.cmd)\n"
+        printf "   \e[7m%s\e[0m - %s\n" "${snapshots[s]}" "$(<"/tmp/profiler.${snapshots[s]}.cmd")"
       fi
     done
     echo
@@ -235,6 +237,7 @@ report_combined() {
   fi
 
   for snapshot in "${snapshots[@]}"; do
+    # shellcheck disable=SC2086
     paste_with_${groupby} "${snapshot}" | filter
   done | sum | percent
 }
@@ -279,7 +282,10 @@ while (( $# != 0 )); do
     ;;
     -h|--help) ;;
     -p|--plain) plain=1 ;;
-    -r|--raw) raw=1 ;;
+    -r|--raw)
+      # shellcheck disable=SC2034
+      raw=1
+    ;;
     --) shift; break ;;
   esac
   shift

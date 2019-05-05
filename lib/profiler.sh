@@ -2,6 +2,7 @@
 
 # TODO: keep actual command, they will be used in reports
 PROFILER_MARKER=$'\035'  # group separator character
+# shellcheck disable=SC2016
 PROFILER_PS4='${PROFILER_MARKER} ${BASH_SOURCE[0]}${PROFILER_MARKER}${BASH_SOURCE[1]}${PROFILER_MARKER}${LINENO}${PROFILER_MARKER}${FUNCNAME}${PROFILER_MARKER}'
 
 export PROFILER_MARKER
@@ -13,7 +14,7 @@ eval() {
 
 profiler_cache_function_contents() {
   for f in $(declare -F | cut -d" " -f3); do
-    declare -f $f | head -n-1 | tail -n+3 > /tmp/profiler-function-contents.$f
+    declare -f "$f" | head -n-1 | tail -n+3 > "/tmp/profiler-function-contents.$f"
   done
   exit &>/dev/null
 }
@@ -23,7 +24,7 @@ export -f profiler_cache_function_contents
 
 __profiler_redirect_xtrace() {
   tee "/tmp/profiler.$1.xtrace" | {
-    sed 's/^.*$/now/'
+    sed -u 's/^.*$/now/'
     echo now
   } | date -f - '+%s.%N' >"/tmp/profiler.$1.timestamps"
   echo "${PROFILER_MARKER}" >>"/tmp/profiler.$1.xtrace"
@@ -39,7 +40,7 @@ __profiler_start() {
     echo "$0" "$@" >"/tmp/profiler.${snapshot}.cmd"
   fi
 
-  exec 4> >(__profiler_redirect_xtrace ${snapshot})
+  exec 4> >(__profiler_redirect_xtrace "${snapshot}")
   export BASH_XTRACEFD=4
   set -x
 }
@@ -99,7 +100,7 @@ __profiler_run() {
       [ "$1" = "bash" ] && shift
       export BASH_XTRACEFD
       export PROFILER
-      BASH_XTRACEFD=4 PROFILER=1 bash -x "$@" 4> >(__profiler_redirect_xtrace ${snapshot})
+      BASH_XTRACEFD=4 PROFILER=1 bash -x "$@" 4> >(__profiler_redirect_xtrace "${snapshot}")
       PS4=${old_ps4}
     ;;
   esac
@@ -121,7 +122,10 @@ profiler() {
   shift
 
   case ${command} in
-    start|stop|run) __profiler_${command} "$@" ;;
-    *) command profiler ${command} "$@" ;;
+    start|stop|run)
+      # shellcheck disable=SC2086
+      __profiler_${command} "$@"
+    ;;
+    *) command profiler "${command}" "$@" ;;
   esac
 }

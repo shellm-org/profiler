@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC1090
+. "${BASHER_PACKAGES_PATH}/shellm/profiler/lib/profiler.sh"
+__profiler_run "$@"
