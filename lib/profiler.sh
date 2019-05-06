@@ -110,7 +110,7 @@ __profiler_run() {
       sleep 0.1
     done
     sleep 0.2
-    profiler collate "${snapshot}"
+    profiler collate "${snapshot}" >/dev/null
     profiler report "${snapshot}" -g "${groupby}"
   fi
 }
