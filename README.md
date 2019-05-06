@@ -2,9 +2,7 @@
   <img src="https://gl.githack.com/shellm/profiler/raw/master/logo.png">
 </p>
 
-<h1 align="center">Profiler</h1>
-
-<p align="center">A Bash profiler.</p>
+<h1 align="center">A Bash profiler.</h1>
 
 <p align="center">
   <a href="https://gitlab.com/shellm/profiler/commits/master">
