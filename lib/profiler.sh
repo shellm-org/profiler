@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# TODO: keep actual command, they will be used in reports
 PROFILER_MARKER=$'\035'  # group separator character
+
 # shellcheck disable=SC2016
 PROFILER_PS4='${PROFILER_MARKER} ${BASH_SOURCE[0]}${PROFILER_MARKER}${BASH_SOURCE[1]}${PROFILER_MARKER}${LINENO}${PROFILER_MARKER}${FUNCNAME}${PROFILER_MARKER}'
 

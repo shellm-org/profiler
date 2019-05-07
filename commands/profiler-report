@@ -1,15 +1,46 @@
 #!/usr/bin/env bash
 
 # TODO: add "command" type (from actual debug output)
-# TODO: read files and print lines when displaying by lines
-#    (we may encounter the eval limitation)
+
+# shellcheck disable=SC1090
+source "$(shellm source-path)"
 
 PROFILER_MARKER=$'\035'  # group separator character
+
 # shellcheck disable=SC2001,SC2046,SC2005
 PROFILER_PACKAGES=${PROFILER_PACKAGES:-/etc/bash_completion.d:/usr/share/bash-completion:/usr/lib/git-core:$(echo $(basher list) | sed 's/ /:/g'):basher}
 
 header() {
-  printf "\e[1m%-10s %8s %8s %8s  %s\e[0m\n" "Time (s)" "(%)" "Inst." "(%)" "${groupby^}"
+  printf "${cHeader}%-10s %8s %8s %8s  %s${cReset}\n" "Time (s)" "(%)" "Inst." "(%)" "${groupby^}"
+}
+
+paste_with_command() {
+  local snapshot=$1
+  local m=${PROFILER_MARKER}
+  paste "/tmp/profiler.${snapshot}.timedata" <(
+    declare interactive=0
+    declare -A last_lineno
+
+    while IFS=$m read -r level source prevsource lineno func command; do
+      # as soon as we find an empty source, we know we're in the interactive part
+      [ -z "${source}" ] && interactive=1
+
+      if (( interactive == 1 )); then
+
+        if [ -n "${func}" ]; then
+          source+=" (${func})"
+        fi
+
+        echo "<${cInt}interactive${cReset}>${cIntSource}${source}${cReset}:${cIntLineno}${lineno}${cIntCommand} ${command}${cReset}"
+      # when source is "environment", it's (usually?) an exported function
+      elif [ "${source}" = "environment" ] || [[ "${source}" == "/dev/fd/"* ]]; then
+        echo "${cFuzzySource}${prevsource}${cReset}:${cFuzzyLineno}${last_lineno[${prevsource}]}+${lineno}${cFuzzyCommand} ${command}${cReset}"
+      else
+        last_lineno[${source}]=${lineno}
+        echo "${cSource}${source}${cReset}:${cLineno}${lineno}${cCommand} ${command}${cReset}"
+      fi
+    done <"/tmp/profiler.${snapshot}.cmddata"
+  )
 }
 
 paste_with_line() {
@@ -52,11 +83,11 @@ paste_with_line() {
           source+=" (${func})"
         fi
 
-        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m:\e[94m'"${lineno}"$'\e[33m '"${command}"$'\e[0m'
+        echo "<${cInt}interactive${cReset}>${cIntSource}${source}${cReset}:${cIntLineno}${lineno}${cIntCommand} ${command}${cReset}"
         continue
       # when source is "environment", it's (usually?) an exported function
       elif [ "${source}" = "environment" ] || [[ "${source}" == "/dev/fd/"* ]]; then
-        echo $'\e[93m'"${prevsource}"$'\e[0m:\e[94m'"${last_lineno[${prevsource}]}+${lineno}"$'\e[33m '"${command}"$'\e[0m'
+        echo "${cFuzzySource}${prevsource}${cReset}:${cFuzzyLineno}${last_lineno[${prevsource}]}+${lineno}${cFuzzyCommand} ${command}${cReset}"
         continue
       fi
 
@@ -65,7 +96,7 @@ paste_with_line() {
       cache "${source}"
       line "${source}"
 
-      echo $'\e[95m'"${source}"$'\e[0m:\e[94m'"${lineno}"$'\e[36m'" ${line}"$'\e[0m'
+      echo "${cSource}${source}${cReset}:${cLineno}${lineno}${cLine} ${line}${cReset}"
     done <"/tmp/profiler.${snapshot}.cmddata"
   )
 }
@@ -86,16 +117,22 @@ paste_with_function() {
       [ "${source}" = "environment" ] && source=${prevsource}
 
       case $func in
-        "") func=$'<\e[94mmain\e[0m>'; [ -z "${source}" ] || func_type[${source}]=${func} ;;
-        source) func=$'<\e[94msource\e[0m>'; [ -z "${source}" ] || func_type[${source}]=${func} ;;
-        eval) func=$'\e[94m'"${func_type[${source}]}"$'\e[0m' ;;
-        *) func=$'\e[36m'"${func}"$'\e[0m' ;;
+        "")
+          func="<${cReservedFunc}main${cReset}>"
+          [ -z "${source}" ] || func_type[${source}]=${func}
+        ;;
+        source)
+          func="<${cReservedFunc}source${cReset}>"
+          [ -z "${source}" ] || func_type[${source}]=${func}
+        ;;
+        eval) func="${func_type[${source}]}" ;;
+        *) func="${cFunc}${func}${cReset}" ;;
       esac
 
       if (( interactive == 1 )); then
-        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m:'"${func}"
+        echo "<${cInt}interactive${cReset}>${cIntSource}${source}${cReset}:${func}"
       else
-        echo $'\e[95m'"${source}"$'\e[0m:'"${func}"
+        echo "${cSource}${source}${cReset}:${func}"
       fi
     done <"/tmp/profiler.${snapshot}.cmddata"
   )
@@ -113,9 +150,9 @@ paste_with_source() {
       [ "${source}" = "environment" ] && source=${prevsource}
 
       if (( interactive == 1 )); then
-        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m'
+        echo "<${cInt}interactive${cReset}>${cIntSource}${source}${cReset}"
       else
-        echo $'\e[95m'"${source}"$'\e[0m'
+        echo "${cSource}${source}${cReset}"
       fi
     done
   )
@@ -145,9 +182,9 @@ paste_with_package() {
       [ "${source}" = "environment" ] && source=${prevsource}
 
       if (( interactive == 1 )); then
-        echo $'<\e[33minteractive\e[0m>\e[95m'"${source}"$'\e[0m'
+        echo "<${cInt}interactive${cReset}>${cIntSource}${source}${cReset}"
       else
-        echo $'\e[95m'"${source}"$'\e[0m'
+        echo "${cSource}${source}${cReset}"
       fi
     done
   )
@@ -197,8 +234,10 @@ report() {
 
   for snapshot in "${snapshots[@]}"; do
     if [ ! -f "/tmp/profiler.${snapshot}.cmddata" ]; then
-      echo "profiler: no such snapshot '${snapshot}'" >&2
-      continue
+      if ! profiler collate "${snapshot}" &>/dev/null; then
+        echo "profiler: no such snapshot '${snapshot}'" >&2
+        continue
+      fi
     fi
 
     if (( plain == 0 )); then
@@ -208,8 +247,8 @@ report() {
         echo
       fi
 
-      printf "\e[1mProfiler report for snapshot:\e[0m\n"
-      printf "   \e[7m%s\e[0m - %s\n" "${snapshot}" "$(<"/tmp/profiler.${snapshot}.cmd")"
+      echo "${cHeader}Profiler report for snapshot:${cReset}"
+      echo "   ${cSnapshot}${snapshot}${cReset} - $(<"/tmp/profiler.${snapshot}.cmd")"
       echo
       header
     fi
@@ -251,6 +290,7 @@ unmatch_filter() {
 }
 
 declare -a snapshots
+declare color=auto
 declare combine=0
 declare raw=0
 declare groupby=line
@@ -259,22 +299,33 @@ declare -a unmatch=(
   -e shellm/profiler/lib/profiler.sh
 )
 
-options="$(getopt -n profiler-report -o "cg:hM:m:pr" -l "combine,group-by:,help,unmatch:,match:,plain,raw" -- "$@")"
+options="$(getopt -n profiler-report -o "cg:hM:m:pr" -l "combine,group-by:,help,unmatch:,match:,plain,raw,color:" -- "$@")"
 command eval set -- "${options}"
 
 while (( $# != 0 )); do
   case $1 in
+    --color)
+      case $2 in
+        auto|always|never) color=$2 ;;
+        *)
+          echo "profiler-report: wrong choice for --color: '$2', choices are: auto, always, never" >&2
+          exit 1
+        ;;
+      esac
+      shift
+    ;;
     -c|--combine) combine=1 ;;
     -M|--unmatch) unmatch+=(-e "$2"); shift ;;
     -m|--match) match+=(-e "$2"); shift ;;
     -g|--group-by)
       case $2 in
-        l*) groupby=line ;;
-        f*) groupby=function ;;
-        s*) groupby=source ;;
-        p*) groupby=package ;;
+        c*) groupby="command" ;;
+        l*) groupby="line" ;;
+        f*) groupby="function" ;;
+        s*) groupby="source" ;;
+        p*) groupby="package" ;;
         *)
-          echo "profiler-report: wrong group for -g: '$2', choices are: line, function, source, package" >&2
+          echo "profiler-report: wrong group for -g: '$2', choices are: command, line, function, source, package" >&2
           exit 1
         ;;
       esac
@@ -290,6 +341,31 @@ while (( $# != 0 )); do
   esac
   shift
 done
+
+shellm source shellm/colors -- "${color}"
+
+if colors; then
+  cReset=$(colors resetAll)
+  cHeader=$(colors bold)
+  cSnapshot=$(colors reverse)
+
+  cInt=$(colors yellow)
+  cIntSource=$(colors intenseMagenta)
+  cIntLineno=$(colors intenseBlue)
+  cIntCommand=$(colors yellow)
+
+  cFuzzySource=$(colors intenseYellow)
+  cFuzzyLineno=$(colors intenseBlue)
+  cFuzzyCommand=$(colors yellow)
+
+  cSource=$(colors intenseMagenta)
+  cLineno=$(colors intenseBlue)
+  cLine=$(colors cyan)
+  cCommand=$(colors cyan)
+
+  cReservedFunc=$(colors intenseBlue)
+  cFunc=$(colors cyan)
+fi
 
 if (( $# == 0 )); then
   snapshots=(${PPID})

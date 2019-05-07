@@ -1,4 +1,4 @@
 BINS="bin/profiler"
-DEPS="gitlab.com/shellm/core:bashup/realpaths"
-BASH_COMPLETIONS="cmp/profiler.completion.bash"
-ZSH_COMPLETIONS="cmp/profiler.completion.zsh"
+DEPS="gitlab.com/shellm/core:gitlab.com/shellm/colors:bashup/realpaths"
+BASH_COMPLETIONS="completion/profiler.completion.bash"
+ZSH_COMPLETIONS="completion/profiler.completion.zsh"
