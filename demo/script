@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-echo "Hello Demo!"
+echo "Hello Profiler!"
 echo sleep 1 && sleep 1
 echo sleep 2; sleep 2
 echo sleep 3
