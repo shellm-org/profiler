@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
-# TODO: add "command" type (from actual debug output)
+# TODO: add command to output a kcachegrind compatible report
+# http://kcachegrind.sourceforge.net/html/CallgrindFormat.html
+
+# TODO: apply filters on data files (create temp files) so we can use
+# regex for filters and still use colors without interefering
 
 # shellcheck disable=SC1090
 source "$(shellm source-path)"

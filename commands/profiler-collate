@@ -33,7 +33,7 @@ collate() {
 
   # compute the time deltas for each command
   # (timedelta(command(N)) = timestamp(N+1) - timestamp(N))
-  # we simply paste the timestamps columns with its 1-shifted version,
+  # we simply paste the timestamps column with its 1-shifted version,
   # so we can do first_column-second_column, instead of more complex stuff
   paste <(tail -n+2 "${timedata}.tmp") "${timedata}.tmp" |
     head -n-1 |
